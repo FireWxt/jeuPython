@@ -9,12 +9,14 @@ from config import *
 from jeu import Unit, generate_map, generate_units, add_objectives, calculate_scores, draw_map, draw_objectives, draw_scores, draw_victory_message
 
 AUTO_MODE = True
-NB_PARTIES = 50
+NB_PARTIES = 550
 PAUSE_BETWEEN_PARTIES = 0.01
 
 # Fichiers
 import csv
 from datetime import datetime
+
+font = pygame.font.SysFont(None, 24)
 
 data_dir = "data"
 os.makedirs(data_dir, exist_ok=True)
@@ -42,6 +44,38 @@ def reset_units(units):
             u.idle_turns += 1
 
 # IA générique avec apprentissage Q-table
+
+def synthesize_qtable(qtable, min_action_value=0.1, keep_only_best=True, min_state_quality=2):
+    """
+    Nettoie et sélectionne les comportements efficaces dans la Q-table.
+
+    - Supprime les actions ≈ 0 (bruit)
+    - Garde uniquement les états avec au moins une action "positive"
+    - Option : ne garder que la meilleure action par état
+    """
+    new_q = {}
+
+    for state, actions in qtable.items():
+        if not actions:
+            continue
+
+        # Ne garde que les actions utiles (supprime le bruit)
+        filtered = {a: v for a, v in actions.items() if abs(v) >= min_action_value}
+        if not filtered:
+            continue
+
+        max_val = max(filtered.values())
+        if max_val < min_state_quality:
+            continue  # Pas un comportement significatif
+
+        if keep_only_best:
+            filtered = {a: v for a, v in filtered.items() if v == max_val}
+
+        if filtered:
+            new_q[state] = filtered
+
+    return new_q
+
 
 def get_state(unit, objectives, units):
     # 1. Position actuelle
@@ -119,13 +153,20 @@ def update_q(state, action, reward, new_state, alpha=0.3, gamma=0.95):
 def ai_turn_reward_based(units, objectives, grid, team_color):
     reward_total = 0
     reward_log = []
+
     for unit in [u for u in units if u.color == team_color and not u.moved]:
+        # État initial
+        on_objective_before = any(unit.x == obj['x'] and unit.y == obj['y'] for obj in objectives)
+        if not hasattr(unit, 'hold_counter'):
+            unit.hold_counter = 0
+        if not hasattr(unit, 'on_objective_last_turn'):
+            unit.on_objective_last_turn = False
+
+        # Action choisie
         state = get_state(unit, objectives, units)
-        
-        actions = [(0,1), (0,-1), (1,0), (-1,0)]
-        attackable = [f"ATTACK_{u.x}_{u.y}" for u in units if u.color != unit.color and unit.can_move(u.x, u.y)]
-        action_str = choose_action(state, unit, units) if 'choose_action' in globals() else str(random.choice(actions))
-        
+        action_str = choose_action(state, unit, units)
+        reward = 0
+
         if action_str.startswith("ATTACK"):
             _, x, y = action_str.split("_")
             x, y = int(x), int(y)
@@ -135,40 +176,59 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
                 prev_on_objective = any(target.x == obj['x'] and target.y == obj['y'] for obj in objectives)
                 unit.attack(target, units, objectives)
                 new_state = get_state(unit, objectives, units)
-                reward = 0
+
                 if target not in units:
-                    reward = -3
-                    reward_log.append(f"KILL({unit.x},{unit.y})->({x},{y}):-3")
+                    reward += 2
+                    reward_log.append(f"KILL({unit.x},{unit.y})->({x},{y}):+2")
                 elif target.pv < prev_pv:
-                    reward = 2
-                    reward_log.append(f"DAMAGE({unit.x},{unit.y})->({x},{y}):+2")
+                    reward += 0.5
+                    reward_log.append(f"DAMAGE({unit.x},{unit.y})->({x},{y}):+0.5")
                 elif prev_on_objective and not any(target.x == obj['x'] and target.y == obj['y'] for obj in objectives):
-                    reward = 2
-                    reward_log.append(f"PUSH_OFF({unit.x},{unit.y})->({x},{y}):+2")
+                    reward += 1
+                    reward_log.append(f"PUSH_OFF({unit.x},{unit.y})->({x},{y}):+1")
+
                 update_q(state, action_str, reward, new_state)
                 reward_total += reward
-                continue
+                continue  # Corrigé : maintenant bien dans la boucle
 
-        action = eval(action_str) if isinstance(action_str, str) else action_str
-        new_x, new_y = unit.x + action[0], unit.y + action[1]
-        if 0 <= new_x < size and 0 <= new_y < size:
-            if any(u.x == new_x and u.y == new_y for u in units):
-                continue
-            reward = 0
-            if any(obj['x'] == new_x and obj['y'] == new_y for obj in objectives):
-                reward = 10
-                reward_log.append(f"MOVE_OBJ({unit.x},{unit.y})->({new_x},{new_y}):+10")
-                unit.idle_turns = 0
-            elif unit.x == new_x and unit.y == new_y and unit.idle_turns >= 1:
-                reward = -5
-                reward_log.append(f"STAY({unit.x},{unit.y}):-5")
+        else:
+            action = eval(action_str)
+            new_x, new_y = unit.x + action[0], unit.y + action[1]
+            if 0 <= new_x < size and 0 <= new_y < size:
+                if any(u.x == new_x and u.y == new_y for u in units):
+                    continue
 
-            unit.move(new_x, new_y)
-            new_state = get_state(unit, objectives, units)
-            update_q(state, action, reward, new_state)
-            reward_total += reward
+                if any(obj['x'] == new_x and obj['y'] == new_y for obj in objectives):
+                    reward += 5
+                    reward_log.append(f"MOVE_OBJ({unit.x},{unit.y})->({new_x},{new_y}):+5")
+                    unit.hold_counter = 1
+                else:
+                    unit.hold_counter = 0
+
+                unit.move(new_x, new_y)
+
+        # MAINTIEN DE POSITION
+        on_objective_now = any(unit.x == obj['x'] and unit.y == obj['y'] for obj in objectives)
+        if on_objective_now:
+            unit.hold_counter += 1
+            if unit.hold_counter >= 2:
+                reward += 2
+                reward_log.append(f"HOLD({unit.x},{unit.y}):+2")
+        else:
+            unit.hold_counter = 0
+
+        # ABANDON DE POINT
+        if unit.on_objective_last_turn and not on_objective_now:
+            reward -= 3
+            reward_log.append(f"LEAVE_POINT({unit.x},{unit.y}):-3")
+
+        # MàJ mémoire et Q-table
+        unit.on_objective_last_turn = on_objective_now
+        new_state = get_state(unit, objectives, units)
+        update_q(state, action_str, reward, new_state)
+        reward_total += reward
+
     return reward_total, reward_log
-
 
 def simulate_auto_game():
     pygame.display.set_caption("Jeu IA vs IA")
@@ -191,13 +251,15 @@ def simulate_auto_game():
         actions_rewarded = []
 
         screen.fill((0, 0, 0))
+        # Affiche le numéro de la partie
+
         draw_map(screen, game_map)
         draw_objectives(screen, objectives)
         for u in units:
             u.draw(screen, units, objectives)
         draw_scores(screen, player_score, enemy_score)
         pygame.display.flip()
-        time.sleep(0.0001)
+        time.sleep(0.000000001)
 
         while not victory:
             print(f"Tour {turn_count + 1}")
@@ -223,10 +285,20 @@ def simulate_auto_game():
                 victory = True
                 message = f"Victoire Joueur (IA Q-Learning) en {turn_count} tours"
                 winner = "Joueur"
+                for u in units:
+                    if u.color == PLAYER_COLOR and any(u.x == o['x'] and u.y == o['y'] for o in objectives):
+                        state = get_state(u, objectives, units)
+                        for a in Q.get(state, {}):
+                            Q[state][a] += 1
             elif enemy_score >= 500:
                 victory = True
                 message = f"Victoire Ennemi (IA Q-Learning) en {turn_count} tours"
                 winner = "Ennemi"
+                for u in units:
+                    if u.color == PLAYER_COLOR and any(u.x == o['x'] and u.y == o['y'] for o in objectives):
+                        state = get_state(u, objectives, units)
+                        for a in Q.get(state, {}):
+                            Q[state][a] += 1
             elif not any(u.color == PLAYER_COLOR for u in units):
                 victory = True
                 message = "Victoire Ennemi (plus d'unités joueur)"
@@ -237,25 +309,31 @@ def simulate_auto_game():
                 winner = "Joueur"
 
             screen.fill((0, 0, 0))
+            partie_text = font.render(f"Partie {partie} / {NB_PARTIES}", True, (255, 255, 255))
+            screen.blit(partie_text, (20, height + 30))  # en haut à gauche
             draw_map(screen, game_map)
             draw_objectives(screen, objectives)
             for u in units:
                 u.draw(screen, units, objectives)
             draw_scores(screen, player_score, enemy_score)
             pygame.display.flip()
-            time.sleep(0.0001)
+            time.sleep(0.000000001)
 
         print(message)
         draw_victory_message(screen, message)
         pygame.display.flip()
-        time.sleep(0.0001)
+        time.sleep(0.000000001)
 
         with open(log_filename, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([partie, turn_count, player_score, enemy_score, winner, total_reward, '|'.join(actions_rewarded)])
 
+
+        Q_clean = synthesize_qtable(Q, min_action_value=0.1, keep_only_best=True, min_state_quality=2)
+
         with open(qtable_filename, 'w') as f:
-            json.dump(Q, f)
+            json.dump(Q_clean, f)
+            print(f"Q-table synthétisée : {len(Q_clean)} états retenus avec comportement positif.")
 
     pygame.quit()
 
