@@ -145,15 +145,6 @@ class Unit:
 
 
 
-    def __init__(self, x, y, color):
-        self.x = x
-        self.y = y
-        self.color = color
-        self.selected = False
-        self.moved = False
-        self.pv = 2
-        self.attacked_this_turn = False
-
     # (Toutes les méthodes draw, can_move, move, move_towards_goal, attack)
     # Idem que tu avais déjà dans ton code.
 
@@ -374,10 +365,10 @@ def main():
                     player_turn = True
 
                 # Victoire ?
-                if player_score >= 900:
+                if player_score >= 500:
                     victory = True
                     victory_message = "Victoire Joueur!"
-                elif enemy_score >= 900:
+                elif enemy_score >= 500:
                     victory = True
                     victory_message = "Victoire Ennemi!"
                 elif not any(u.color == PLAYER_COLOR for u in units):
