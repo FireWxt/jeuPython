@@ -9,8 +9,8 @@ from config import *
 from jeu import Unit, generate_map, generate_units, add_objectives, calculate_scores, draw_map, draw_objectives, draw_scores, draw_victory_message
 
 AUTO_MODE = True
-NB_PARTIES = 550
-PAUSE_BETWEEN_PARTIES = 0.01
+NB_PARTIES = 500
+PAUSE_BETWEEN_PARTIES = 0.1
 
 # Fichiers
 import csv
@@ -142,7 +142,7 @@ def choose_action(state, unit, units):
 
 
 
-def update_q(state, action, reward, new_state, alpha=0.3, gamma=0.95):
+def update_q(state, action, reward, new_state, alpha=0.25, gamma=0.95):
     action = str(action)
     if new_state not in Q:
         Q[new_state] = {str(a): 0 for a in [(0,1), (0,-1), (1,0), (-1,0)]}
@@ -178,11 +178,11 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
                 new_state = get_state(unit, objectives, units)
 
                 if target not in units:
-                    reward += 2
-                    reward_log.append(f"KILL({unit.x},{unit.y})->({x},{y}):+2")
+                    reward += 1
+                    reward_log.append(f"KILL({unit.x},{unit.y})->({x},{y}):+1")
                 elif target.pv < prev_pv:
-                    reward += 0.5
-                    reward_log.append(f"DAMAGE({unit.x},{unit.y})->({x},{y}):+0.5")
+                    reward += 1
+                    reward_log.append(f"DAMAGE({unit.x},{unit.y})->({x},{y}):+1")
                 elif prev_on_objective and not any(target.x == obj['x'] and target.y == obj['y'] for obj in objectives):
                     reward += 1
                     reward_log.append(f"PUSH_OFF({unit.x},{unit.y})->({x},{y}):+1")
@@ -199,8 +199,8 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
                     continue
 
                 if any(obj['x'] == new_x and obj['y'] == new_y for obj in objectives):
-                    reward += 5
-                    reward_log.append(f"MOVE_OBJ({unit.x},{unit.y})->({new_x},{new_y}):+5")
+                    reward += 8
+                    reward_log.append(f"MOVE_OBJ({unit.x},{unit.y})->({new_x},{new_y}):+8")
                     unit.hold_counter = 1
                 else:
                     unit.hold_counter = 0
@@ -219,8 +219,8 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
 
         # ABANDON DE POINT
         if unit.on_objective_last_turn and not on_objective_now:
-            reward -= 3
-            reward_log.append(f"LEAVE_POINT({unit.x},{unit.y}):-3")
+            reward -= 1
+            reward_log.append(f"LEAVE_POINT({unit.x},{unit.y}):-1")
 
         # MàJ mémoire et Q-table
         unit.on_objective_last_turn = on_objective_now
@@ -233,6 +233,9 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
 def simulate_auto_game():
     pygame.display.set_caption("Jeu IA vs IA")
     screen = pygame.display.set_mode((width, height + interface_height))
+
+    nb_gagnées_score_max = 0
+    nb_parties_score_max = 0
 
     for partie in range(1, NB_PARTIES + 1):
         print(f"Démarrage de la partie {partie}...")
@@ -259,7 +262,7 @@ def simulate_auto_game():
             u.draw(screen, units, objectives)
         draw_scores(screen, player_score, enemy_score)
         pygame.display.flip()
-        time.sleep(0.000000001)
+        time.sleep(0.0001)
 
         while not victory:
             print(f"Tour {turn_count + 1}")
@@ -308,6 +311,8 @@ def simulate_auto_game():
                 message = "Victoire Joueur (plus d'unités ennemies)"
                 winner = "Joueur"
 
+
+
             screen.fill((0, 0, 0))
             partie_text = font.render(f"Partie {partie} / {NB_PARTIES}", True, (255, 255, 255))
             screen.blit(partie_text, (20, height + 30))  # en haut à gauche
@@ -317,16 +322,31 @@ def simulate_auto_game():
                 u.draw(screen, units, objectives)
             draw_scores(screen, player_score, enemy_score)
             pygame.display.flip()
-            time.sleep(0.000000001)
+            time.sleep(0.0001)
 
         print(message)
         draw_victory_message(screen, message)
         pygame.display.flip()
-        time.sleep(0.000000001)
+        time.sleep(0.0001)
+
+        if nb_parties_score_max > 0:
+            pourcentage_gagné = (nb_gagnées_score_max / NB_PARTIES) * 100
+        else:
+            pourcentage_gagné = 0
 
         with open(log_filename, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([partie, turn_count, player_score, enemy_score, winner, total_reward, '|'.join(actions_rewarded)])
+
+        if player_score > 499 or enemy_score > 499:
+                nb_parties_score_max += 1
+                if (player_score > 499 and winner == "Joueur") or (enemy_score > 499 and winner == "Ennemi"):
+                    nb_gagnées_score_max += 1
+
+        with open(log_filename, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([])
+            writer.writerow(['% Parties Gagnees au score', f"{pourcentage_gagné:.2f}%"])
 
 
         Q_clean = synthesize_qtable(Q, min_action_value=0.1, keep_only_best=True, min_state_quality=2)
@@ -334,6 +354,7 @@ def simulate_auto_game():
         with open(qtable_filename, 'w') as f:
             json.dump(Q_clean, f)
             print(f"Q-table synthétisée : {len(Q_clean)} états retenus avec comportement positif.")
+
 
     pygame.quit()
 
