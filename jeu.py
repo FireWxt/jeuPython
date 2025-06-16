@@ -1,8 +1,10 @@
 # main_game.py
 
 import pygame
+import os
+import json
 import random
-from ai import ai_turn
+from auto_game import ai_turn_reward_based
 from config import *
 
 # -----------------------
@@ -10,7 +12,14 @@ from config import *
 # -----------------------
 pygame.init()
 
+global Q
 
+qtable_filename = "data/q_table.json"
+if os.path.exists(qtable_filename):
+    with open(qtable_filename, 'r') as f:
+        Q = json.load(f)
+else:
+    Q = {}
 # -----------------------
 # 3) PATHFINDING
 # -----------------------
@@ -354,7 +363,7 @@ def main():
 
                     # Appel IA
                     player_turn = False
-                    ai_turn(units, objectives, game_map)
+                    ai_turn_reward_based(units, objectives, game_map, ENEMY_COLOR)
 
                     # Recalcul score
                     p_score_turn, e_score_turn = calculate_scores(units, objectives)

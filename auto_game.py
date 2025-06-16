@@ -109,6 +109,7 @@ def get_state(unit, objectives, units):
 
 
 def choose_action(state, unit, units):
+    global Q
     directions = [(0,1), (0,-1), (1,0), (-1,0)]
     attackable = [f"ATTACK_{u.x}_{u.y}" for u in units if u.color != unit.color and unit.can_move(u.x, u.y)]
     actions_str = [str(a) for a in directions] + attackable
@@ -143,6 +144,7 @@ def choose_action(state, unit, units):
 
 
 def update_q(state, action, reward, new_state, alpha=0.25, gamma=0.95):
+    global Q
     action = str(action)
     if new_state not in Q:
         Q[new_state] = {str(a): 0 for a in [(0,1), (0,-1), (1,0), (-1,0)]}
@@ -151,6 +153,7 @@ def update_q(state, action, reward, new_state, alpha=0.25, gamma=0.95):
     Q[state][action] = old_value + alpha * (reward + gamma * future - old_value)
 
 def ai_turn_reward_based(units, objectives, grid, team_color):
+    global Q
     reward_total = 0
     reward_log = []
 
