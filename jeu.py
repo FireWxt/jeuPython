@@ -4,8 +4,10 @@ import pygame
 import os
 import json
 import random
-from auto_game import ai_turn_reward_based
+## Import déplacé dans main() pour éviter l'import circulaire
 from config import *
+from reward import *
+
 
 # -----------------------
 # 1) CONFIG ET CONSTANTES
@@ -281,6 +283,7 @@ def draw_victory_message(screen, message):
     screen.blit(victory_img, (width // 2 - 100, height // 2 - 24))
 
 def main():
+    from auto_game import ai_turn_reward_based
     pygame.display.set_caption("Jeu de stratégie IA")
     screen = pygame.display.set_mode((width, height + interface_height))
 
