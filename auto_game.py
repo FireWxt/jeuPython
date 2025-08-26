@@ -9,8 +9,8 @@ from config import *
 from jeu import Unit, generate_map, generate_units, add_objectives, calculate_scores, draw_map, draw_objectives, draw_scores, draw_victory_message
 
 AUTO_MODE = True
-NB_PARTIES = 500
-PAUSE_BETWEEN_PARTIES = 0.1
+NB_PARTIES = 800
+PAUSE_BETWEEN_PARTIES = 0.001
 
 # Fichiers
 import csv
@@ -24,7 +24,7 @@ log_filename = os.path.join(data_dir, f"logs_parties_{datetime.now().strftime('%
 qtable_filename = os.path.join(data_dir, "q_table.json")
 
 # Initialiser Q-table
-if os.path.exists(qtable_filename):
+if os.path.exists(qtable_filename) and os.path.getsize(qtable_filename) > 0:
     with open(qtable_filename, 'r') as f:
         Q = json.load(f)
 else:
@@ -199,7 +199,7 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
                     continue
 
                 if any(obj['x'] == new_x and obj['y'] == new_y for obj in objectives):
-                    reward += 8
+                    reward += 10
                     reward_log.append(f"MOVE_OBJ({unit.x},{unit.y})->({new_x},{new_y}):+8")
                     unit.hold_counter = 1
                 else:
@@ -212,7 +212,7 @@ def ai_turn_reward_based(units, objectives, grid, team_color):
         if on_objective_now:
             unit.hold_counter += 1
             if unit.hold_counter >= 2:
-                reward += 2
+                reward += 3
                 reward_log.append(f"HOLD({unit.x},{unit.y}):+2")
         else:
             unit.hold_counter = 0
@@ -338,9 +338,9 @@ def simulate_auto_game():
             writer = csv.writer(f)
             writer.writerow([partie, turn_count, player_score, enemy_score, winner, total_reward, '|'.join(actions_rewarded)])
 
-        if player_score > 499 or enemy_score > 499:
+        if player_score >= 500 or enemy_score >= 500:
                 nb_parties_score_max += 1
-                if (player_score > 499 and winner == "Joueur") or (enemy_score > 499 and winner == "Ennemi"):
+                if (player_score >= 500 and winner == "Joueur") or (enemy_score >= 500 and winner == "Ennemi"):
                     nb_gagnées_score_max += 1
 
         with open(log_filename, mode='a', newline='') as f:
