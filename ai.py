@@ -66,10 +66,10 @@ def choose_action(state, unit, units, Q, eps: float = 0.1, objectives=None, grid
     for dx, dy in directions:
         nx, ny = unit.x + dx, unit.y + dy
         if dx == 0 and dy == 0:
-            move_actions.append(str((dx, dy)))  # rester est toujours autorisé
+            move_actions.append(str((dx, dy)))
             continue
         if 0 <= nx < size and 0 <= ny < size:
-            # si tu as un terrain bloquant, ajoute: and grid[ny][nx] == 1
+ 
             if not any(u.x == nx and u.y == ny for u in units):
                 move_actions.append(str((dx, dy)))
 
