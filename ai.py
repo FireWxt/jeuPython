@@ -1,100 +1,82 @@
-from config import *
+# ai.py
+from config import *  # size, couleurs, etc.
 import random
 
+def get_state(unit, objectives, units):
+    pos = (unit.x, unit.y)
+    on_objective = any(unit.x == obj['x'] and unit.y == obj['y'] for obj in objectives)
+    close_enemies = sum(1 for u in units if u.color != unit.color and abs(u.x - unit.x) <= 1 and abs(u.y - unit.y) <= 1)
+    local_objectives = sum(1 for obj in objectives if abs(obj['x'] - unit.x) <= 1 and abs(obj['y'] - unit.y) <= 1)
+    enemies = [u for u in units if u.color != unit.color]
+    nearest_enemy_dist = min([abs(u.x - unit.x) + abs(u.y - unit.y) for u in enemies], default=99)
+    return f"{unit.x},{unit.y},{int(on_objective)},{close_enemies},{local_objectives},{nearest_enemy_dist}"
 
-def find_attackable_player_unit(ai_unit, units):
-    """
-    Renvoie une unité du joueur que 'ai_unit' peut attaquer.
-    Amélioration : On choisit en priorité l'ennemi le plus faible (peu de HP),
-    puis le plus proche.
-    """
-    possible_targets = []
-    for u in units:
-        if u.color == PLAYER_COLOR:
-            if ai_unit.can_move(u.x, u.y):  # portée d'attaque
-                possible_targets.append(u)
-    if not possible_targets:
-        return None
-    # Tri par (HP, distance)
-    return min(
-        possible_targets,
-        key=lambda p: (p.hp, heuristic((ai_unit.x, ai_unit.y), (p.x, p.y)))
-    )
+def choose_action(state, unit, units, Q):
+    directions = [(0,1), (0,-1), (1,0), (-1,0)]
+    attackable = [f"ATTACK_{u.x}_{u.y}" for u in units if u.color != unit.color and unit.can_move(u.x, u.y)]
+    actions_str = [str(a) for a in directions] + attackable
 
+    if state not in Q:
+        Q[state] = {a: 0 for a in actions_str}
 
-def ai_turn(units, objectives, grid):
-    """
-    IA améliorée :
-    1. Attaque en priorité si un joueur est à portée.
-    2. Si l'unité est faible, elle se replie.
-    3. Sinon, elle tente de contrôler les objectifs (majeurs > mineurs).
-    4. Défense : au moins une unité garde chaque objectif.
-    5. Les unités restantes se regroupent.
-    6. Un peu d'aléa pour éviter un comportement trop prévisible.
-    """
+    if random.random() < 0.1:  # exploration
+        return random.choice(actions_str)
 
-    def ai_unit_on_objective(obj):
-        # Amélioration : on retourne la liste des défenseurs IA sur l'objectif
-        return [u for u in units if u.x == obj['x'] and u.y == obj['y'] and u.color == ENEMY_COLOR]
+    max_value = max(Q[state].values(), default=0)
+    best_actions = [a for a in actions_str if Q[state].get(a, float('-inf')) == max_value]
+    return random.choice(best_actions) if best_actions else random.choice(actions_str)
 
-    def get_closest_free_ai_unit_for(obj):
-        free_ai_units = [u for u in units if u.color == ENEMY_COLOR and not u.moved]
-        if not free_ai_units:
-            return None
-        return min(free_ai_units, key=lambda u: heuristic((u.x, u.y), (obj['x'], obj['y'])))
+def update_q(state, action, reward, new_state, Q, alpha=0.25, gamma=0.95):
+    action = str(action)
+    if new_state not in Q:
+        Q[new_state] = {str(a): 0 for a in [(0,1), (0,-1), (1,0), (-1,0)]}
+    old_value = Q[state][action]
+    future = max(Q[new_state].values())
+    Q[state][action] = old_value + alpha * (reward + gamma * future - old_value)
 
-    def objective_value(obj):
-        # Amélioration : donner une valeur plus forte aux objectifs majeurs
-        return 10 if obj['type'] == 'MAJOR' else 5
+def ai_turn_reward_based(units, objectives, grid, team_color, Q):
+    reward_total = 0
+    reward_log = []
 
+    for unit in [u for u in units if u.color == team_color and not u.moved]:
+        state = get_state(unit, objectives, units)
+        action_str = choose_action(state, unit, units, Q)
+        reward = 0
 
-    # PHASE 1 : Attaque
-    
-    for unit in units:
-        if unit.color == ENEMY_COLOR and not unit.moved:
-
-            # Amélioration : retraite si unité trop faible
-            if unit.hp <= 1:
-                nearest_obj = min(objectives, key=lambda o: heuristic((unit.x, unit.y), (o['x'], o['y'])))
-                unit.move_towards_goal((nearest_obj['x'], nearest_obj['y']), grid)
-                unit.moved = True
-                continue
-
-
-            target = find_attackable_player_unit(unit, units)
+        if action_str.startswith("ATTACK"):
+            _, x, y = action_str.split("_")
+            x, y = int(x), int(y)
+            target = next((u for u in units if u.x == x and u.y == y and u.color != unit.color), None)
             if target:
+                prev_pv = target.pv
                 unit.attack(target, units, objectives)
-                unit.moved = True
-
-    
-    # PHASE 2 : Contrôle des objectifs
-
-    for obj in sorted(objectives, key=objective_value, reverse=True):
-        defenders = ai_unit_on_objective(obj)
-        if not defenders:  # objectif libre
-            closest_unit = get_closest_free_ai_unit_for(obj)
-            if closest_unit:
-                closest_unit.move_towards_goal((obj['x'], obj['y']), grid)
-                closest_unit.moved = True
+                new_state = get_state(unit, objectives, units)
+                if target not in units:
+                    reward += 1
+                    reward_log.append(f"KILL({unit.x},{unit.y})->({x},{y}):+1")
+                elif target.pv < prev_pv:
+                    reward += 1
+                    reward_log.append(f"DAMAGE({unit.x},{unit.y})->({x},{y}):+1")
+                update_q(state, action_str, reward, new_state, Q)
+                reward_total += reward
+                continue
         else:
-            # Amélioration : une unité reste en défense
-            defenders[0].moved = True
+            action = eval(action_str)
+            new_x, new_y = unit.x + action[0], unit.y + action[1]
+            if 0 <= new_x < size and 0 <= new_y < size:
+                if not any(u.x == new_x and u.y == new_y for u in units):
+                    if any(obj['x'] == new_x and obj['y'] == new_y for obj in objectives):
+                        reward += 8
+                        reward_log.append(f"MOVE_OBJ({unit.x},{unit.y})->({new_x},{new_y}):+8")
+                    unit.move(new_x, new_y)
 
-    
-    # PHASE 3 : Défense / leftover
-    
-    leftover_units = [u for u in units if u.color == ENEMY_COLOR and not u.moved]
-    if leftover_units:
-        # Amélioration : point de rassemblement = moyenne des positions
-        avg_x = sum(u.x for u in leftover_units) // len(leftover_units)
-        avg_y = sum(u.y for u in leftover_units) // len(leftover_units)
-        rally_point = (avg_x, avg_y)
+        on_objective_now = any(unit.x == obj['x'] and unit.y == obj['y'] for obj in objectives)
+        if on_objective_now:
+            reward += 2
+            reward_log.append(f"HOLD({unit.x},{unit.y}):+2")
 
-        for unit in leftover_units:
-            # Amélioration : petit facteur d'aléa (20% de chance de se déplacer ailleurs)
-            if random.random() < 0.2:
-                rand_pos = (unit.x + random.choice([-1, 1]), unit.y + random.choice([-1, 1]))
-                unit.move_towards_goal(rand_pos, grid)
-            else:
-                unit.move_towards_goal(rally_point, grid)
-            unit.moved = True
+        new_state = get_state(unit, objectives, units)
+        update_q(state, action_str, reward, new_state, Q)
+        reward_total += reward
+
+    return reward_total, reward_log

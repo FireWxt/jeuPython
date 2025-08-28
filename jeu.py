@@ -1,10 +1,11 @@
 # main_game.py
 
+from logging import log
 import pygame
 import os
 import json
 import random
-from auto_game import ai_turn_reward_based
+from ai import ai_turn_reward_based
 from config import *
 
 # -----------------------
@@ -363,8 +364,8 @@ def main():
 
                     # Appel IA
                     player_turn = False
-                    ai_turn_reward_based(units, objectives, game_map, ENEMY_COLOR)
-
+                    reward, log = ai_turn_reward_based(units, objectives, game_map, ENEMY_COLOR, Q)
+                    print("IA log:", log) 
                     # Recalcul score
                     p_score_turn, e_score_turn = calculate_scores(units, objectives)
                     player_score += p_score_turn
