@@ -88,6 +88,7 @@ def simulate_auto_game():
             "Gagnant", "Recompenses", "Actions_Recompensees"
         ])
 
+
     nb_gagnees_score_max = 0
     nb_parties_score_max = 0
 
@@ -102,11 +103,12 @@ def simulate_auto_game():
         total_reward = 0
         actions_rewarded = []
 
+        print(f"=== Partie {partie} ===")
         # Boucle de partie (IA rouge vs IA bleue)
         while not victory:
             for team in [PLAYER_COLOR, ENEMY_COLOR]:
                 # ✨ APPEL IA (maintenant importée depuis ai.py) et passage de Q
-                reward, log = ai_turn_reward_based(units, objectives, game_map, team, Q)
+                reward, log = ai_turn_reward_based(units, objectives, game_map, team, Q, turn_count=turn_count)
                 total_reward += reward
                 actions_rewarded.extend(log)
 
@@ -117,6 +119,13 @@ def simulate_auto_game():
                 enemy_score += es
                 turn_count += 1
 
+                # screen.fill((BACKGROUND_COLOR))
+                # draw_map(screen, game_map)
+                # draw_objectives(screen, objectives)
+                # for u in units:
+                #     u.draw(screen, units,objectives)
+                # draw_scores(screen, player_score, enemy_score)
+                # pygame.display.flip()
             # Conditions de victoire
             if player_score >= 500:
                 victory = True
@@ -131,6 +140,20 @@ def simulate_auto_game():
                 victory = True
                 winner = "Joueur"
 
+        if player_score > 499 or enemy_score > 499:
+                nb_parties_score_max += 1
+                if (player_score > 499 and winner == "Joueur") or (enemy_score > 499 and winner == "Ennemi"):
+                    nb_gagnees_score_max += 1
+
+
+        if nb_parties_score_max > 0:
+            pourcentage_gagne = (nb_gagnees_score_max / NB_PARTIES) * 100
+        else:
+            pourcentage_gagne = 0
+
+
+
+
         # Log CSV
         with open(log_filename, mode="a", newline="") as f:
             writer = csv.writer(f)
@@ -138,11 +161,17 @@ def simulate_auto_game():
                 partie, turn_count, player_score, enemy_score,
                 winner, total_reward, "|".join(actions_rewarded)
             ])
+        
 
-        # Nettoyage + sauvegarde Q-table
-        Q_clean = synthesize_qtable(Q, min_action_value=0.1, keep_only_best=True, min_state_quality=2)
-        with open(qtable_filename, "w") as f:
-            json.dump(Q_clean, f)
+        with open(log_filename, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([])
+            writer.writerow(['% Parties Gagnees au score', f"{pourcentage_gagne:.2f}%"])
+
+    # Nettoyage + sauvegarde Q-table
+    Q_clean = synthesize_qtable(Q, min_action_value=0.1, keep_only_best=True, min_state_quality=2)
+    with open(qtable_filename, "w") as f:
+        json.dump(Q_clean, f)
 
         # Petite pause si tu veux visualiser (optionnel)
         if PAUSE_BETWEEN_PARTIES:
